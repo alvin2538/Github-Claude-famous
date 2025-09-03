@@ -1,277 +1,560 @@
-import React, { useState } from 'react';
+// src/components/PortfolioAnalysis.tsx
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
-import { PieChart, BarChart3, TrendingUp, AlertTriangle, Shield, Target } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { 
+  TrendingUp, 
+  TrendingDown, 
+  PieChart, 
+  BarChart3, 
+  DollarSign,
+  Target,
+  AlertTriangle,
+  RefreshCw,
+  Calendar
+} from 'lucide-react';
+import { 
+  portfolioService, 
+  Portfolio, 
+  Position, 
+  PortfolioPerformance, 
+  PortfolioAnalytics 
+} from '../services/portfolioService';
 
 const PortfolioAnalysis = () => {
-  const [selectedTimeframe, setSelectedTimeframe] = useState('1M');
+  const [selectedPortfolio, setSelectedPortfolio] = useState<string>('');
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
+  const [currentPortfolio, setCurrentPortfolio] = useState<Portfolio | null>(null);
+  const [performance, setPerformance] = useState<PortfolioPerformance | null>(null);
+  const [analytics, setAnalytics] = useState<PortfolioAnalytics | null>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState('1m');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
-  const correlationMatrix = [
-    { pair: 'EUR/USD vs GBP/USD', correlation: 0.78, risk: 'High' },
-    { pair: 'USD/JPY vs EUR/JPY', correlation: 0.65, risk: 'Medium' },
-    { pair: 'BTC/USD vs ETH/USD', correlation: 0.89, risk: 'Very High' },
-    { pair: 'Gold vs Silver', correlation: 0.72, risk: 'High' },
-    { pair: 'Oil vs CAD/USD', correlation: -0.43, risk: 'Low' }
-  ];
+  // Mock user ID - in a real app this would come from authentication
+  const userId = 'user_123';
 
-  const portfolioMetrics = {
-    totalValue: 125840.50,
-    dailyPnL: 2340.75,
-    weeklyPnL: 8920.30,
-    monthlyPnL: 15670.80,
-    sharpeRatio: 2.14,
-    maxDrawdown: -8.5,
-    winRate: 68.4,
-    riskScore: 7.2
+  // Load user portfolios on component mount
+  useEffect(() => {
+    loadUserPortfolios();
+  }, []);
+
+  const loadUserPortfolios = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const userPortfolios = await portfolioService.getUserPortfolios(userId);
+      setPortfolios(userPortfolios);
+      
+      // Select first portfolio if none selected
+      if (userPortfolios.length > 0 && !selectedPortfolio) {
+        setSelectedPortfolio(userPortfolios[0].id);
+      }
+    } catch (error) {
+      console.error('Error loading portfolios:', error);
+      setError('Failed to load portfolios');
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, selectedPortfolio]);
+
+  // Load portfolio data when selection changes
+  useEffect(() => {
+    if (selectedPortfolio) {
+      loadPortfolioData(selectedPortfolio);
+    }
+  }, [selectedPortfolio, selectedPeriod]);
+
+  const loadPortfolioData = useCallback(async (portfolioId: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Load portfolio details
+      const portfolio = await portfolioService.getPortfolio(portfolioId);
+      if (!portfolio) {
+        throw new Error('Portfolio not found');
+      }
+      setCurrentPortfolio(portfolio);
+
+      // Load performance data
+      const performanceData = await portfolioService.getPerformance(portfolioId, selectedPeriod);
+      setPerformance(performanceData);
+
+      // Load analytics
+      const analyticsData = await portfolioService.getAnalytics(portfolioId);
+      setAnalytics(analyticsData);
+
+      setLastUpdate(new Date());
+    } catch (error) {
+      console.error('Error loading portfolio data:', error);
+      setError(error instanceof Error ? error.message : 'Failed to load portfolio data');
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedPeriod]);
+
+  // Subscribe to portfolio updates
+  useEffect(() => {
+    if (!selectedPortfolio) return;
+
+    const unsubscribe = portfolioService.subscribeToPortfolio((updatedPortfolio) => {
+      if (updatedPortfolio.id === selectedPortfolio) {
+        setCurrentPortfolio(updatedPortfolio);
+        setLastUpdate(new Date());
+      }
+    });
+
+    return unsubscribe;
+  }, [selectedPortfolio]);
+
+  const refreshData = useCallback(() => {
+    if (selectedPortfolio) {
+      loadPortfolioData(selectedPortfolio);
+    }
+  }, [selectedPortfolio, loadPortfolioData]);
+
+  const createNewPortfolio = useCallback(async () => {
+    try {
+      const newPortfolio = await portfolioService.createPortfolio(
+        userId,
+        `Portfolio ${portfolios.length + 1}`,
+        'New trading portfolio'
+      );
+      
+      setPortfolios(prev => [newPortfolio, ...prev]);
+      setSelectedPortfolio(newPortfolio.id);
+    } catch (error) {
+      console.error('Error creating portfolio:', error);
+      setError('Failed to create portfolio');
+    }
+  }, [userId, portfolios.length]);
+
+  const formatCurrency = (amount: number): string => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2
+    }).format(amount);
   };
 
-  const allocations = [
-    { asset: 'Forex', percentage: 45, value: 56628, color: 'bg-blue-500' },
-    { asset: 'Crypto', percentage: 30, value: 37752, color: 'bg-purple-500' },
-    { asset: 'Commodities', percentage: 15, value: 18876, color: 'bg-yellow-500' },
-    { asset: 'Indices', percentage: 10, value: 12584, color: 'bg-green-500' }
-  ];
+  const formatPercent = (percent: number): string => {
+    return `${percent >= 0 ? '+' : ''}${percent.toFixed(2)}%`;
+  };
 
-  const riskMetrics = [
-    { name: 'Value at Risk (95%)', value: '$3,245', status: 'Normal' },
-    { name: 'Expected Shortfall', value: '$4,890', status: 'Elevated' },
-    { name: 'Beta', value: '1.23', status: 'High' },
-    { name: 'Volatility', value: '18.5%', status: 'Normal' }
-  ];
+  const getPositionColor = (pnl: number): string => {
+    return pnl >= 0 ? 'text-green-600' : 'text-red-600';
+  };
+
+  const getRiskColor = (score: number): string => {
+    if (score < 30) return 'text-green-600';
+    if (score < 70) return 'text-yellow-600';
+    return 'text-red-600';
+  };
+
+  if (loading && !currentPortfolio) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center py-8">
+          <RefreshCw className="h-8 w-8 animate-spin mr-2" />
+          <span>Loading portfolio data...</span>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <PieChart className="h-6 w-6 text-blue-500" />
-          <h2 className="text-2xl font-bold">Portfolio Analysis</h2>
-        </div>
-        <div className="flex gap-2">
-          {['1D', '1W', '1M', '3M'].map((tf) => (
-            <Button
-              key={tf}
-              variant={selectedTimeframe === tf ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setSelectedTimeframe(tf)}
-            >
-              {tf}
-            </Button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Total Portfolio Value</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">${portfolioMetrics.totalValue.toLocaleString()}</div>
-            <div className="text-sm text-green-600 flex items-center gap-1">
-              <TrendingUp className="h-4 w-4" />
-              +{portfolioMetrics.dailyPnL.toLocaleString()} (24h)
+    <div className="space-y-4">
+      {/* Portfolio Selection */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5" />
+              Portfolio Analysis
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={refreshData} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+              <Button variant="default" size="sm" onClick={createNewPortfolio}>
+                New Portfolio
+              </Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </CardHeader>
+        
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">Select Portfolio</label>
+              <Select value={selectedPortfolio} onValueChange={setSelectedPortfolio}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose a portfolio" />
+                </SelectTrigger>
+                <SelectContent>
+                  {portfolios.map(portfolio => (
+                    <SelectItem key={portfolio.id} value={portfolio.id}>
+                      {portfolio.name} - {formatCurrency(portfolio.totalValue)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Sharpe Ratio</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{portfolioMetrics.sharpeRatio}</div>
-            <div className="text-sm text-muted-foreground">Risk-adjusted return</div>
-          </CardContent>
-        </Card>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Time Period</label>
+              <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1d">1 Day</SelectItem>
+                  <SelectItem value="1w">1 Week</SelectItem>
+                  <SelectItem value="1m">1 Month</SelectItem>
+                  <SelectItem value="3m">3 Months</SelectItem>
+                  <SelectItem value="1y">1 Year</SelectItem>
+                  <SelectItem value="all">All Time</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Max Drawdown</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600">{portfolioMetrics.maxDrawdown}%</div>
-            <div className="text-sm text-muted-foreground">Worst decline</div>
-          </CardContent>
-        </Card>
+            <div className="flex items-end">
+              <div className="text-sm text-muted-foreground">
+                Last updated: {lastUpdate.toLocaleTimeString()}
+              </div>
+            </div>
+          </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Win Rate</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">{portfolioMetrics.winRate}%</div>
-            <div className="text-sm text-muted-foreground">Successful trades</div>
-          </CardContent>
-        </Card>
-      </div>
+          {error && (
+            <Alert className="mt-4" variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
 
-      <Tabs defaultValue="allocation" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="allocation">Asset Allocation</TabsTrigger>
-          <TabsTrigger value="correlation">Correlation Matrix</TabsTrigger>
-          <TabsTrigger value="risk">Risk Metrics</TabsTrigger>
-          <TabsTrigger value="optimization">Optimization</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="allocation" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
+      {currentPortfolio && (
+        <>
+          {/* Portfolio Overview */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card>
-              <CardHeader>
-                <CardTitle>Asset Allocation</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {allocations.map((asset, index) => (
-                  <div key={index} className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="font-medium">{asset.asset}</span>
-                      <span>{asset.percentage}%</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className={`w-4 h-4 rounded ${asset.color}`} />
-                      <Progress value={asset.percentage} className="flex-1" />
-                      <span className="text-sm text-muted-foreground">
-                        ${asset.value.toLocaleString()}
-                      </span>
-                    </div>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Total Value</p>
+                    <p className="text-2xl font-bold">{formatCurrency(currentPortfolio.totalValue)}</p>
                   </div>
-                ))}
+                  <DollarSign className="h-8 w-8 text-blue-500" />
+                </div>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle>Performance Breakdown</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex justify-between">
-                  <span>Daily P&L</span>
-                  <span className="text-green-600 font-medium">
-                    +${portfolioMetrics.dailyPnL.toLocaleString()}
-                  </span>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Day Change</p>
+                    <p className={`text-2xl font-bold ${getPositionColor(currentPortfolio.dayChange)}`}>
+                      {formatPercent(currentPortfolio.dayChangePercent)}
+                    </p>
+                  </div>
+                  {currentPortfolio.dayChange >= 0 ? (
+                    <TrendingUp className="h-8 w-8 text-green-500" />
+                  ) : (
+                    <TrendingDown className="h-8 w-8 text-red-500" />
+                  )}
                 </div>
-                <div className="flex justify-between">
-                  <span>Weekly P&L</span>
-                  <span className="text-green-600 font-medium">
-                    +${portfolioMetrics.weeklyPnL.toLocaleString()}
-                  </span>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Unrealized P&L</p>
+                    <p className={`text-2xl font-bold ${getPositionColor(currentPortfolio.unrealizedPnL)}`}>
+                      {formatCurrency(currentPortfolio.unrealizedPnL)}
+                    </p>
+                  </div>
+                  <Target className="h-8 w-8 text-purple-500" />
                 </div>
-                <div className="flex justify-between">
-                  <span>Monthly P&L</span>
-                  <span className="text-green-600 font-medium">
-                    +${portfolioMetrics.monthlyPnL.toLocaleString()}
-                  </span>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Positions</p>
+                    <p className="text-2xl font-bold">{currentPortfolio.positions.length}</p>
+                  </div>
+                  <PieChart className="h-8 w-8 text-orange-500" />
                 </div>
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
 
-        <TabsContent value="correlation" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Asset Correlation Analysis</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {correlationMatrix.map((item, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
-                    <div className="flex-1">
-                      <div className="font-medium">{item.pair}</div>
-                      <div className="text-sm text-muted-foreground">
-                        Correlation: {item.correlation > 0 ? '+' : ''}{item.correlation}
-                      </div>
-                    </div>
-                    <Badge variant={
-                      item.risk === 'Very High' ? 'destructive' :
-                      item.risk === 'High' ? 'destructive' :
-                      item.risk === 'Medium' ? 'secondary' : 'default'
-                    }>
-                      {item.risk} Risk
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+          {/* Detailed Analysis Tabs */}
+          <Tabs defaultValue="positions" className="space-y-4">
+            <TabsList>
+              <TabsTrigger value="positions">Positions</TabsTrigger>
+              <TabsTrigger value="performance">Performance</TabsTrigger>
+              <TabsTrigger value="analytics">Analytics</TabsTrigger>
+              <TabsTrigger value="allocation">Allocation</TabsTrigger>
+            </TabsList>
 
-        <TabsContent value="risk" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            {riskMetrics.map((metric, index) => (
-              <Card key={index}>
+            <TabsContent value="positions">
+              <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Shield className="h-5 w-5" />
-                    {metric.name}
-                  </CardTitle>
+                  <CardTitle>Current Positions</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-2">
-                    <div className="text-2xl font-bold">{metric.value}</div>
-                    <Badge variant={
-                      metric.status === 'High' ? 'destructive' :
-                      metric.status === 'Elevated' ? 'secondary' : 'default'
-                    }>
-                      {metric.status}
-                    </Badge>
-                  </div>
+                  {currentPortfolio.positions.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <PieChart className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>No positions in this portfolio</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {currentPortfolio.positions.map((position, index) => (
+                        <div
+                          key={position.id}
+                          className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div>
+                              <div className="font-medium">{position.symbol}</div>
+                              <div className="text-sm text-muted-foreground">
+                                {position.quantity.toFixed(8)} @ {formatCurrency(position.avgPrice)}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="text-center">
+                            <div className="font-medium">{formatCurrency(position.currentPrice)}</div>
+                            <div className="text-sm text-muted-foreground">
+                              Current Price
+                            </div>
+                          </div>
+
+                          <div className="text-center">
+                            <div className="font-medium">{formatCurrency(position.marketValue)}</div>
+                            <div className="text-sm text-muted-foreground">
+                              Market Value
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <div className={`font-medium ${getPositionColor(position.unrealizedPnL)}`}>
+                              {formatCurrency(position.unrealizedPnL)}
+                            </div>
+                            <div className={`text-sm ${getPositionColor(position.unrealizedPnLPercent)}`}>
+                              {formatPercent(position.unrealizedPnLPercent)}
+                            </div>
+                          </div>
+
+                          <div className="text-right text-sm text-muted-foreground">
+                            <div>{new Date(position.lastUpdated).toLocaleDateString()}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
-            ))}
-          </div>
-        </TabsContent>
+            </TabsContent>
 
-        <TabsContent value="optimization" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="h-5 w-5 text-green-500" />
-                  Optimization Suggestions
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="h-4 w-4 text-yellow-500 mt-1" />
-                  <div>
-                    <div className="font-medium">Reduce Crypto Exposure</div>
-                    <div className="text-sm text-muted-foreground">
-                      High correlation between BTC and ETH positions
+            <TabsContent value="performance">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Performance Metrics</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {performance ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-4">
+                        <div className="flex justify-between">
+                          <span>Total Return:</span>
+                          <span className={`font-medium ${getPositionColor(performance.absoluteReturn)}`}>
+                            {formatCurrency(performance.absoluteReturn)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Return %:</span>
+                          <span className={`font-medium ${getPositionColor(performance.percentReturn)}`}>
+                            {formatPercent(performance.percentReturn)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Volatility:</span>
+                          <span className="font-medium">{formatPercent(performance.volatility * 100)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Sharpe Ratio:</span>
+                          <span className="font-medium">{performance.sharpeRatio.toFixed(2)}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-4">
+                        <div className="flex justify-between">
+                          <span>Max Drawdown:</span>
+                          <span className="font-medium text-red-600">
+                            {formatPercent(performance.maxDrawdown * 100)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Win Rate:</span>
+                          <span className="font-medium">{formatPercent(performance.winRate)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Total Trades:</span>
+                          <span className="font-medium">{performance.totalTrades}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Profit Factor:</span>
+                          <span className="font-medium">{performance.profitFactor.toFixed(2)}</span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2">
-                  <TrendingUp className="h-4 w-4 text-green-500 mt-1" />
-                  <div>
-                    <div className="font-medium">Increase Commodities</div>
-                    <div className="text-sm text-muted-foreground">
-                      Low correlation provides better diversification
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>Performance data not available</p>
                     </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Risk Score</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="text-3xl font-bold">{portfolioMetrics.riskScore}/10</div>
-                  <Progress value={portfolioMetrics.riskScore * 10} className="h-3" />
-                  <div className="text-sm text-muted-foreground">
-                    Moderate risk profile with room for optimization
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-      </Tabs>
+            <TabsContent value="analytics">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Risk Analytics</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {analytics ? (
+                    <div className="space-y-6">
+                      {/* Diversification */}
+                      <div>
+                        <h3 className="text-lg font-medium mb-3">Diversification</h3>
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span>Diversification Score:</span>
+                            <span className="font-medium">{analytics.diversification.score.toFixed(0)}/100</span>
+                          </div>
+                          <Progress value={analytics.diversification.score} className="h-2" />
+                          
+                          <div className="mt-4">
+                            <h4 className="text-sm font-medium mb-2">Asset Breakdown:</h4>
+                            {Object.entries(analytics.diversification.breakdown).map(([asset, weight]) => (
+                              <div key={asset} className="flex justify-between text-sm">
+                                <span>{asset}:</span>
+                                <span>{formatPercent(weight * 100)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Risk Metrics */}
+                      <div>
+                        <h3 className="text-lg font-medium mb-3">Risk Metrics</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="flex justify-between">
+                            <span>Value at Risk (95%):</span>
+                            <span className="font-medium text-red-600">
+                              {formatCurrency(analytics.riskMetrics.var95)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Expected Shortfall:</span>
+                            <span className="font-medium text-red-600">
+                              {formatCurrency(analytics.riskMetrics.expectedShortfall)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Portfolio Beta:</span>
+                            <span className="font-medium">{analytics.riskMetrics.beta.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Volatility:</span>
+                            <span className="font-medium">{formatPercent(analytics.riskMetrics.volatility * 100)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <BarChart3 className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>Analytics data not available</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="allocation">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Portfolio Allocation</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {analytics ? (
+                    <div className="space-y-6">
+                      {/* By Asset Class */}
+                      <div>
+                        <h3 className="text-lg font-medium mb-3">By Asset Class</h3>
+                        <div className="space-y-2">
+                          {Object.entries(analytics.allocation.byAsset).map(([asset, percentage]) => (
+                            <div key={asset} className="space-y-1">
+                              <div className="flex justify-between text-sm">
+                                <span>{asset}</span>
+                                <span>{formatPercent(percentage)}</span>
+                              </div>
+                              <Progress value={percentage} className="h-2" />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* By Exchange */}
+                      <div>
+                        <h3 className="text-lg font-medium mb-3">By Exchange</h3>
+                        <div className="space-y-2">
+                          {Object.entries(analytics.allocation.byExchange).map(([exchange, percentage]) => (
+                            <div key={exchange} className="space-y-1">
+                              <div className="flex justify-between text-sm">
+                                <span>{exchange}</span>
+                                <span>{formatPercent(percentage)}</span>
+                              </div>
+                              <Progress value={percentage} className="h-2" />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <PieChart className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>Allocation data not available</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </>
+      )}
     </div>
   );
 };
